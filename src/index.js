@@ -31,7 +31,7 @@ async function main() {
 
     try {
         // 1. Start the API/Webhook server
-        const port = process.env.PORT || config.PORT || 3000;
+        const port = parseInt(process.env.PORT || config.PORT || 3000);
         logger.info(`Starting API & Webhook server on port ${port}...`);
         api.startAPI(port);
 

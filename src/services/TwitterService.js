@@ -1,60 +1,72 @@
-const { TwitterApi } = require('twitter-api-v2');
-const config = require('../config/config');
+const { ApifyClient } = require('apify-client');
 const logger = require('../utils/logger');
 
 class TwitterService {
     constructor() {
-        if (!config.TWITTER_BEARER_TOKEN) {
-            logger.warn('TWITTER_BEARER_TOKEN is not defined in .env');
+        this.enabled = !!process.env.APIFY_API_TOKEN;
+        if (!this.enabled) {
+            logger.warn('[TwitterService] APIFY_API_TOKEN is not defined in .env — social scoring disabled.');
             return;
         }
-        this.client = new TwitterApi(config.TWITTER_BEARER_TOKEN);
-        this.readOnlyClient = this.client.readOnly;
+        this.client = new ApifyClient({ token: process.env.APIFY_API_TOKEN });
+        // Best free Twitter scraper on Apify (no X API key needed)
+        this.actorId = 'apidojo/tweet-scraper';
     }
 
     /**
-     * Search for mentions of a token.
-     * @param {string} query - Token name, $Ticker, or CA
-     * @returns {Object} - totalMentions, engagementScore
+     * Search for mentions of a token ticker on X/Twitter via Apify.
+     * @param {string} query - e.g. "$WIF" or "WIF solana"
+     * @returns {{ totalMentions: number, engagementScore: number }}
      */
     async fetchMentions(query) {
-        if (!query) return { totalMentions: 0, engagementScore: 0 };
+        if (!this.enabled || !query) return { totalMentions: 0, engagementScore: 0 };
+
         try {
-            if (!this.readOnlyClient) return { totalMentions: 0, engagementScore: 0 };
+            logger.info(`[TwitterService] Scraping mentions for: ${query}`);
 
-            // Search for tweets in the last 24 hours for better sample size
-            const startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            // Run the actor and wait for it to finish
+            const run = await this.client.actor(this.actorId).call({
+                searchTerms: [query],
+                maxTweets: 20,
+                since: this._hoursAgo(24), // Last 24 hours
+                language: 'en',
+            }, { waitSecs: 45 }); // Max wait: 45 seconds
 
-            const search = await this.readOnlyClient.v2.search(query, {
-                'start_time': startTime,
-                'tweet.fields': 'public_metrics,author_id',
-                'expansions': 'author_id',
-                'user.fields': 'public_metrics',
-                max_results: 10
-            });
+            // Fetch results from the run's dataset
+            const { items } = await this.client.dataset(run.defaultDatasetId).listItems({ limit: 20 });
+
+            if (!items || items.length === 0) {
+                return { totalMentions: 0, engagementScore: 0 };
+            }
 
             let totalMentions = 0;
             let engagementScore = 0;
 
-            for await (const tweet of search) {
+            for (const tweet of items) {
                 totalMentions++;
-                const metrics = tweet.public_metrics;
-                const author = search.includes.users.find(u => u.id === tweet.author_id);
-                const followers = author ? author.public_metrics.followers_count : 0;
 
-                // formula: engagement_score = followers * 0.3 + retweets * 0.5 + likes * 0.2
-                const tweetEngagement = (followers * 0.3) +
-                    (metrics.retweet_count * 0.5) +
-                    (metrics.like_count * 0.2);
+                // Engagement formula: followers × 0.3 + retweets × 0.5 + likes × 0.2
+                const followers = tweet.author?.followers || tweet.user?.followersCount || 0;
+                const retweets = tweet.retweetCount || tweet.retweet_count || 0;
+                const likes = tweet.likeCount || tweet.favorite_count || 0;
 
-                engagementScore += tweetEngagement;
+                engagementScore += (followers * 0.3) + (retweets * 0.5) + (likes * 0.2);
             }
 
+            logger.info(`[TwitterService] Found ${totalMentions} mentions for ${query}, engagement: ${engagementScore.toFixed(0)}`);
             return { totalMentions, engagementScore };
+
         } catch (error) {
-            logger.error(`Error fetching Twitter mentions for ${query}:`, error.message);
+            logger.error(`[TwitterService] Apify scrape failed for "${query}":`, error.message);
             return { totalMentions: 0, engagementScore: 0 };
         }
+    }
+
+    /**
+     * Returns an ISO date string N hours ago
+     */
+    _hoursAgo(hours) {
+        return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString().split('T')[0]; // "YYYY-MM-DD"
     }
 }
 

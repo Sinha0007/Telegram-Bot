@@ -15,7 +15,7 @@ class AlphaScoringService {
      * @param {string} ticker 
      * @param {string} deployer 
      */
-    async computeScore(mint, ticker = null, deployer = null) {
+    async computeScore(mint, ticker = null, deployer = null, sendAlert = true) {
         // 1. Concurrency Control (Redis Lock)
         const locked = await redisService.acquireLock(mint);
         if (!locked) {
@@ -145,8 +145,10 @@ class AlphaScoringService {
                 ]);
             }
 
-            // 6. Automated Telegram Alert
-            await this.sendAutomatedAlert(mint, ticker, alphaScore, rugReport, liquidity, recommendation);
+            // 6. Automated Telegram Alert (only when explicitly requested)
+            if (sendAlert) {
+                await this.sendAutomatedAlert(mint, ticker, alphaScore, rugReport, liquidity, recommendation);
+            }
 
             return finalResult;
 
@@ -173,24 +175,26 @@ class AlphaScoringService {
      */
     getMarketReport(ticker, mint, result) {
         const { alphaScore, recommendation, liquidity, dexData, name } = result;
-        const price = dexData?.priceUsd ? `$${parseFloat(dexData.priceUsd).toFixed(8)}` : '$0.000000';
-        const changes = dexData?.priceChange || { m5: 0, h1: 0, h24: 0 };
+        const price = dexData?.priceUsd ? `$${parseFloat(dexData.priceUsd).toFixed(8)}` : '$0.00000000';
+        const m5 = dexData?.priceChange?.m5 ?? 0;
+        const h1 = dexData?.priceChange?.h1 ?? 0;
+        const h24 = dexData?.priceChange?.h24 ?? 0;
         const volume = dexData?.volume?.h24 || 0;
         const fdv = dexData?.fdv || 0;
         const dex = dexData?.dexId ? dexData.dexId.charAt(0).toUpperCase() + dexData.dexId.slice(1) : 'Unknown';
 
         return [
-            `📈 *$${ticker}* — ${name || 'N/A'}`,
+            `📈 *$${ticker}* — ${name || ticker}`,
             `🔗 Chain: Solana | DEX: ${dex}`,
             ``,
             `💵 Price:      ${price}`,
-            `📈 5m/1h/24h:  +${changes.m5}% / +${changes.h1}% / +${changes.h24}%`,
-            `💧 Liquidity:  $${liquidity?.toLocaleString() || 'N/A'}`,
-            `📦 Volume 24h: $${volume > 1000 ? (volume / 1000).toFixed(1) + 'K' : volume}`,
-            `🏦 FDV:        $${fdv > 1000000 ? (fdv / 1000000).toFixed(2) + 'M' : (fdv / 1000).toFixed(1) + 'K'}`,
+            `📈 5m/1h/24h:  ${m5 >= 0 ? '+' : ''}${m5}% / ${h1 >= 0 ? '+' : ''}${h1}% / ${h24 >= 0 ? '+' : ''}${h24}%`,
+            `💧 Liquidity:  $${liquidity?.toLocaleString() || '0'}`,
+            `📦 Volume 24h: $${volume > 1000 ? (volume / 1000).toFixed(1) + 'K' : volume.toFixed(0)}`,
+            `🏦 FDV:        $${fdv > 1000000 ? (fdv / 1000000).toFixed(2) + 'M' : fdv > 1000 ? (fdv / 1000).toFixed(1) + 'K' : fdv.toFixed(0)}`,
             `Prediction:    ${alphaScore}% (${alphaScore > 75 ? 'HIGH' : alphaScore > 40 ? 'MODERATE' : 'LOW'})`,
             ``,
-            `� [View on DexScreener](https://dexscreener.com/solana/${mint})`
+            `🔎 [View on DexScreener](https://dexscreener.com/solana/${mint})`
         ].join('\n');
     }
 

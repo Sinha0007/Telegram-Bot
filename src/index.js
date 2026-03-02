@@ -6,11 +6,17 @@ const SniffAlphaBot = require('./bot');
 const VolumeVelocityAgent = require('./agents/VolumeVelocityAgent');
 const SocialVelocityAgent = require('./agents/SocialVelocityAgent');
 const dexService = require('./services/DexScreenerService');
+const db = require('./services/DatabaseService');
 
 logger.info('--- 🚀 Starting SniffAlpha Intelligence System ---');
 
 async function main() {
     try {
+        // 0. Initialize Database (create tables if not exist)
+        logger.info('Initializing Database...');
+        await db.init();
+        logger.success('Database ready.');
+
         // 1. Start the API/Webhook server
         logger.info(`Starting API & Webhook server on port ${config.PORT}...`);
         api.startAPI();

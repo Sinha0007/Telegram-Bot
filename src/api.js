@@ -196,13 +196,27 @@ app.post('/config/token', async (req, res) => {
 // SERVER
 // ═══════════════════════════════════════════════════════
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000');
 
-function startAPI() {
-    app.listen(PORT, () => {
-        console.log(`[API] SniffAlpha server running on port ${PORT}`);
+function startAPI(port = PORT) {
+    const server = app.listen(port, () => {
+        console.log(`[API] SniffAlpha server running on port ${port}`);
         console.log(`[API] Endpoints: POST /dispatch | GET /alerts/:token | GET /alerts/history`);
+        // Update so other parts of the app know the actual port
+        process.env.PORT = port;
     });
+
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.warn(`[API] Port ${port} in use, trying ${port + 1}...`);
+            server.close();
+            startAPI(port + 1);
+        } else {
+            throw err;
+        }
+    });
+
+    return server;
 }
 
 module.exports = { startAPI };

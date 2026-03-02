@@ -11,15 +11,25 @@ class RedisService {
 
         try {
             this.client = new Redis(process.env.REDIS_URL, {
+                tls: process.env.REDIS_URL?.startsWith('rediss://') ? {} : undefined,
                 retryStrategy: (times) => {
-                    const delay = Math.min(times * 50, 2000);
-                    return delay;
+                    if (times > 3) {
+                        logger.warn('[RedisService] Redis max retries hit — disabling Redis.');
+                        this.enabled = false;
+                        return null; // Stop retrying
+                    }
+                    return Math.min(times * 200, 2000);
                 },
                 maxRetriesPerRequest: 3,
+                enableReadyCheck: false,
+                lazyConnect: false,
             });
 
             this.client.on('connect', () => logger.success('[RedisService] Connected to Redis'));
-            this.client.on('error', (err) => logger.error('[RedisService] Connection error:', err.message));
+            this.client.on('error', (err) => {
+                logger.error('[RedisService] Connection error:', err.message);
+                // Don't let Redis errors crash the bot
+            });
         } catch (error) {
             logger.error('[RedisService] Initialization failed:', error.message);
             this.enabled = false;

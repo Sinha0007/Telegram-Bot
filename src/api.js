@@ -9,6 +9,15 @@ const app = express();
 app.use(bodyParser.json());
 
 // Routes
+app.get('/', (req, res) => {
+    res.json({
+        status: 'online',
+        service: 'SniffAlpha Intelligence System',
+        environment: process.env.RAILWAY_ENVIRONMENT || 'local',
+        timestamp: new Date().toISOString()
+    });
+});
+
 const heliusWebhook = require('./webhook/heliusWebhook');
 app.use('/webhook', heliusWebhook);
 
@@ -208,6 +217,10 @@ function startAPI(port = PORT) {
 
     server.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {
+            if (process.env.RAILWAY_ENVIRONMENT) {
+                console.error(`[API] Port ${port} is already in use. On Railway, this is critical! Shutting down...`);
+                process.exit(1);
+            }
             console.warn(`[API] Port ${port} in use, trying ${port + 1}...`);
             server.close();
             startAPI(port + 1);

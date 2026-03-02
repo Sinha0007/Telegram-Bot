@@ -5,17 +5,20 @@ const logger = require('../utils/logger');
 
 class TelegramService {
     constructor() {
-        this.apiId = parseInt(config.TELEGRAM_API_ID);
-        this.apiHash = config.TELEGRAM_API_HASH;
-        this.stringSession = new StringSession(process.env.TELEGRAM_SESSION || "");
+        // Only initialize if credentials are set — skip entirely otherwise
+        this.enabled = !!(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH);
+        if (!this.enabled) {
+            logger.warn('[TelegramService] TELEGRAM_API_ID/HASH not set — Telegram social monitoring disabled.');
+            return;
+        }
+        this.apiId = parseInt(process.env.TELEGRAM_API_ID);
+        this.apiHash = process.env.TELEGRAM_API_HASH;
+        this.stringSession = new StringSession(process.env.TELEGRAM_SESSION || '');
         this.client = null;
     }
 
     async init() {
-        if (!this.apiId || !this.apiHash) {
-            logger.warn('Telegram API credentials missing in .env');
-            return;
-        }
+        if (!this.enabled) return;
         try {
             this.client = new TelegramClient(this.stringSession, this.apiId, this.apiHash, {
                 connectionRetries: 5,

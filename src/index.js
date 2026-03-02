@@ -11,6 +11,15 @@ const db = require('./services/DatabaseService');
 logger.info('--- 🚀 Starting SniffAlpha Intelligence System ---');
 
 async function main() {
+    // 0. Check for critical environment variables
+    const requiredEnv = ['BOT_TOKEN', 'HELIUS_API_KEY', 'ALERT_CHANNEL_ID', 'DATABASE_URL'];
+    const missingEnv = requiredEnv.filter(key => !process.env[key]);
+
+    if (missingEnv.length > 0) {
+        logger.warn(`Missing environment variables: ${missingEnv.join(', ')}`);
+        logger.info('Note: Bot may not function correctly if critical variables are missing.');
+    }
+
     // 0. Initialize Database (non-fatal — bot works without DB)
     logger.info('Initializing Database...');
     try {
@@ -22,20 +31,23 @@ async function main() {
 
     try {
         // 1. Start the API/Webhook server
-        logger.info(`Starting API & Webhook server on port ${config.PORT}...`);
-        api.startAPI();
-        logger.success(`API server online. Webhook at http://localhost:${config.PORT}/webhook/helius`);
+        const port = process.env.PORT || config.PORT || 3000;
+        logger.info(`Starting API & Webhook server on port ${port}...`);
+        api.startAPI(port);
+
+        const host = process.env.RAILWAY_STATIC_URL ? `https://${process.env.RAILWAY_STATIC_URL}` : `http://localhost:${port}`;
+        logger.success(`API server online. Webhook receiver at ${host}/webhook/helius`);
 
         // 2. Start the Telegram Bot
         logger.info('Starting Telegram Bot...');
         if (!process.env.BOT_TOKEN) {
-            logger.error('BOT_TOKEN is not set in environment variables! Bot cannot start.');
+            logger.error('BOT_TOKEN is not set in environment variables! Telegram Bot CANNOT start.');
         } else {
             try {
                 const bot = new SniffAlphaBot();
                 module.exports.activeBot = bot;
                 await bot.launch();
-                logger.success('SniffAlpha Bot is live!');
+                logger.success('SniffAlpha Telegram Bot is LIVE and POLLING.');
 
                 process.once('SIGINT', () => bot.stop('SIGINT'));
                 process.once('SIGTERM', () => bot.stop('SIGTERM'));
@@ -60,19 +72,21 @@ async function main() {
 
         logger.success('Periodic Monitoring Workers are ACTIVE.');
 
-        // 4. Graceful shutdown
-        const stopAll = async () => {
-            logger.info('Shutting down...');
-            bot.stop();
+        // 4. Graceful shutdown handler
+        const stopAll = async (signal) => {
+            logger.info(`Received ${signal}. Shutting down...`);
+            if (module.exports.activeBot) {
+                module.exports.activeBot.stop(signal);
+            }
             process.exit(0);
         };
 
-        process.once('SIGINT', stopAll);
-        process.once('SIGTERM', stopAll);
+        process.once('SIGINT', () => stopAll('SIGINT'));
+        process.once('SIGTERM', () => stopAll('SIGTERM'));
 
     } catch (error) {
         logger.error('Critical failure on startup:', error.message);
-        // Don't exit — let Railway keep the container alive for debugging
+        // Don't exit — let Railway keep the container alive for debugging logs
     }
 }
 
